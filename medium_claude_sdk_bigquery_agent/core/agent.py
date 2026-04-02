@@ -79,55 +79,61 @@ class AgentService(AgentServicePort):
             session_id = str(uuid.uuid4())
         if checkpoint_dir is None:
             checkpoint_dir = os.getcwd()
-
-        # Define agent
-        _agent = AgentDefinition(
-            description=AGENT_DESCRIPTION,
-            prompt=BIGQUERY_AGENT_PROMPT.replace("{QUESTION}", question)
-            .replace("{TABLE_SCHEMA}", schema)
-            .replace("{DATASET_ID}", DATASET_ID)
-            .replace("{TABLE_ID}", TABLE_ID),
-            tools=[f"mcp__{MCP_SERVER_NAME}__{TOOL_NAME}"],
-            model=DEFAULT_MODEL,
-        )
-
-        vertex_env = {}
-        if project_id := os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID"):
-            vertex_env["ANTHROPIC_VERTEX_PROJECT_ID"] = project_id
-        if region := os.environ.get("CLOUD_ML_REGION"):
-            vertex_env["CLOUD_ML_REGION"] = region
-
-        # Only resume if the session actually exists on disk; otherwise start
-        # fresh so the returned session_id always matches the stored file
-        _resume_id = session_id
-        _session_exists = bool(
-            get_session_messages(session_id=_resume_id, directory=checkpoint_dir)
-        )
-
-        client = ClaudeSDKClient(
-            options=ClaudeAgentOptions(
-                allowed_tools=[f"mcp__{MCP_SERVER_NAME}__{TOOL_NAME}"],
-                mcp_servers={MCP_SERVER_NAME: self._mcp_server},
-                agents={AGENT_NAME: _agent},
-                enable_file_checkpointing=True,
-                session_id=session_id if not _session_exists else None,
-                continue_conversation=_session_exists,
-                resume=_resume_id if _session_exists else None,
-                cwd=checkpoint_dir,
-                env=vertex_env if vertex_env else None,
+        try:
+            # Define agent
+            _agent = AgentDefinition(
+                description=AGENT_DESCRIPTION,
+                prompt=BIGQUERY_AGENT_PROMPT.replace("{QUESTION}", question)
+                .replace("{TABLE_SCHEMA}", schema)
+                .replace("{DATASET_ID}", DATASET_ID)
+                .replace("{TABLE_ID}", TABLE_ID),
+                tools=[f"mcp__{MCP_SERVER_NAME}__{TOOL_NAME}"],
+                model=DEFAULT_MODEL,
             )
-        )
 
-        await client.connect()
-        self.logger.info(f"Session {session_id} executing question: {question}")
-        await client.query(prompt=question, session_id=session_id)
+            vertex_env = {}
+            if project_id := os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID"):
+                vertex_env["ANTHROPIC_VERTEX_PROJECT_ID"] = project_id
+            if region := os.environ.get("CLOUD_ML_REGION"):
+                vertex_env["CLOUD_ML_REGION"] = region
 
-        result = ""
-        async for message in client.receive_messages():
-            if hasattr(message, "result"):
-                result = str(message.result)
-                break
+            # Only resume if the session actually exists on disk; otherwise start
+            # fresh so the returned session_id always matches the stored file
+            _resume_id = session_id
+            _session_exists = bool(
+                get_session_messages(session_id=_resume_id, directory=checkpoint_dir)
+            )
 
-        await client.disconnect()
-        self.logger.info(f"Session {session_id} successful response: {result}")
-        return result, session_id
+            client = ClaudeSDKClient(
+                options=ClaudeAgentOptions(
+                    allowed_tools=[f"mcp__{MCP_SERVER_NAME}__{TOOL_NAME}"],
+                    mcp_servers={MCP_SERVER_NAME: self._mcp_server},
+                    agents={AGENT_NAME: _agent},
+                    enable_file_checkpointing=True,
+                    session_id=session_id if not _session_exists else None,
+                    continue_conversation=_session_exists,
+                    resume=_resume_id if _session_exists else None,
+                    cwd=checkpoint_dir,
+                    env=vertex_env if vertex_env else None,
+                )
+            )
+
+            await client.connect()
+            self.logger.info(f"Session {session_id} executing question: {question}")
+            await client.query(prompt=question, session_id=session_id)
+
+            result = ""
+            async for message in client.receive_messages():
+                if hasattr(message, "result"):
+                    result = str(message.result)
+                    break
+            else:
+                self.logger.warning(f"Session {session_id} received no result message")
+
+            self.logger.info(f"Session {session_id} successful response: {result}")
+            return result, session_id
+        except Exception as e:
+            self.logger.error(f"Request failed with error: {e}")
+            return "", session_id
+        finally:
+            await client.disconnect()
