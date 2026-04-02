@@ -91,7 +91,6 @@ class AgentService(AgentServicePort):
             model=DEFAULT_MODEL,
         )
 
-        # To do: wrap try/except and catch exceptions
         vertex_env = {}
         if project_id := os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID"):
             vertex_env["ANTHROPIC_VERTEX_PROJECT_ID"] = project_id
