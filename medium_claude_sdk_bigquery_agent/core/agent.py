@@ -79,6 +79,8 @@ class AgentService(AgentServicePort):
             session_id = str(uuid.uuid4())
         if checkpoint_dir is None:
             checkpoint_dir = os.getcwd()
+
+        client = None
         try:
             # Define agent
             _agent = AgentDefinition(
@@ -97,8 +99,7 @@ class AgentService(AgentServicePort):
             if region := os.environ.get("CLOUD_ML_REGION"):
                 vertex_env["CLOUD_ML_REGION"] = region
 
-            # Only resume if the session actually exists on disk; otherwise start
-            # fresh so the returned session_id always matches the stored file
+            # Identify new session
             _resume_id = session_id
             _session_exists = bool(
                 get_session_messages(session_id=_resume_id, directory=checkpoint_dir)
@@ -136,4 +137,5 @@ class AgentService(AgentServicePort):
             self.logger.error(f"Request failed with error: {e}")
             return "", session_id
         finally:
-            await client.disconnect()
+            if client is not None:
+                await client.disconnect()
